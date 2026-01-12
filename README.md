@@ -160,3 +160,172 @@ multisig/
 ## License
 
 MIT
+
+---
+
+## Auditor Notes
+
+This section provides guidance for security auditors reviewing this project.
+
+### 1. Smart Contract Audit (`src/Multisig.sol`)
+
+**This is the primary component requiring security verification.**
+
+#### Contract Overview
+
+- **Purpose**: Multi-signature wallet for USDT transfers requiring N-of-M owner approvals
+- **Lines of Code**: ~294 lines of Solidity
+- **Compiler**: Solidity ^0.8.13
+- **Dependencies**: OpenZeppelin contracts (audited, industry standard)
+
+#### Security Checklist
+
+| Area | What to Verify |
+|------|----------------|
+| **Access Control** | Only owners can submit/approve/revoke transactions |
+| **Threshold Logic** | Threshold must be > 0 and ≤ owner count |
+| **No Backdoors** | No admin functions to drain funds or bypass threshold |
+| **No Privileged Roles** | All owners have equal rights, no super-admin |
+| **Reentrancy** | Protected via OpenZeppelin `ReentrancyGuard` |
+| **Integer Overflow** | Solidity 0.8.x has built-in overflow protection |
+| **Fund Withdrawal** | Only via approved multisig transactions |
+
+#### Key Security Properties to Verify
+
+1. **No single owner can withdraw funds** - Requires `threshold` approvals
+2. **No external party can withdraw funds** - Only owners can interact
+3. **No hidden owner addition** - No functions to add/remove owners post-deployment
+4. **Immutable USDT address** - Cannot be changed after deployment
+5. **Balance verification** - Transfer success verified by balance change (handles legacy USDT quirks)
+
+#### Attack Vectors to Test
+
+- [ ] Can a non-owner submit/approve transactions?
+- [ ] Can threshold be bypassed?
+- [ ] Can the same owner approve twice?
+- [ ] Can executed transactions be re-executed?
+- [ ] Reentrancy during execution?
+- [ ] Front-running attacks?
+- [ ] Self-transfer edge cases?
+
+#### External Dependencies
+
+| Dependency | Source | Audit Status |
+|------------|--------|--------------|
+| `@openzeppelin/contracts/token/ERC20/IERC20.sol` | [OpenZeppelin](https://github.com/OpenZeppelin/openzeppelin-contracts) | ✅ Audited multiple times |
+| `@openzeppelin/contracts/utils/ReentrancyGuard.sol` | [OpenZeppelin](https://github.com/OpenZeppelin/openzeppelin-contracts) | ✅ Audited multiple times |
+
+OpenZeppelin contracts are the industry standard and have been audited by Trail of Bits, OpenZeppelin's internal team, and others. See: https://github.com/OpenZeppelin/openzeppelin-contracts/tree/master/audits
+
+---
+
+### 2. TRC20 USDT Reference (`TRC20_USDT/`)
+
+**These contracts are NOT deployed by this project - they are reference copies.**
+
+#### Purpose
+
+The `TRC20_USDT/` folder contains an exact copy of the USDT TRC20 token deployed on TRON mainnet by Tether. This is used for:
+- Local testing against realistic USDT behavior
+- Understanding legacy Solidity 0.4.x behavior (no return value on `transfer()`)
+
+#### Verification Required
+
+| Check | Description |
+|-------|-------------|
+| ✅ **Source verification** | Compare against Tether's official deployed contract on TRON |
+| ✅ **No modifications** | Verify no backdoors or changes were added |
+| ⚠️ **Trust assumption** | We trust Tether's deployed contract as it holds billions in value |
+
+#### Official TRON USDT Contract
+
+- **Mainnet**: `TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t`
+- **Source**: https://tronscan.org/#/contract/TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t/code
+
+**Action**: Diff the `TRC20_USDT/TetherToken.sol` against the official deployed source to verify no modifications.
+
+---
+
+### 3. Flutter App Dependencies
+
+The mobile/desktop app uses these third-party packages. Auditors should verify:
+- No malicious code in dependencies
+- Secure cryptographic implementations
+- No data exfiltration
+
+#### Critical Dependencies (Crypto/Security)
+
+| Package | Version | Purpose | Security Notes |
+|---------|---------|---------|----------------|
+| `web3dart` | ^2.7.3 | Ethereum/EVM interaction | ✅ [Open source](https://github.com/xclud/web3dart), 500+ GitHub stars, widely used |
+| `pointycastle` | ^3.9.1 | Cryptographic primitives | ✅ [Dart port of BouncyCastle](https://github.com/bcgit/pc-dart), well-established crypto library |
+| `encrypt` | ^5.0.3 | AES encryption | ✅ [Open source](https://github.com/nickvanderlinden/encrypt), uses pointycastle |
+| `bs58check` | ^1.0.2 | Base58Check encoding | ✅ Standard Bitcoin address encoding |
+
+#### Non-Critical Dependencies
+
+| Package | Version | Purpose | Security Notes |
+|---------|---------|---------|----------------|
+| `http` | ^1.2.0 | HTTP client | ✅ Official Dart team package |
+| `provider` | ^6.1.2 | State management | ✅ Flutter team recommended |
+| `shared_preferences` | ^2.3.3 | Local storage | ✅ Official Flutter plugin |
+| `intl` | ^0.19.0 | Internationalization | ✅ Official Dart team package |
+| `convert` | ^3.1.1 | Encoding utilities | ✅ Official Dart team package |
+| `cupertino_icons` | ^1.0.8 | iOS icons | ✅ Official Flutter package |
+
+#### Dependency Verification Commands
+
+```bash
+# Check for known vulnerabilities (if using OSV scanner)
+cd app && flutter pub outdated
+
+# View dependency tree
+cd app && flutter pub deps
+
+# Audit package sources
+# All packages can be inspected at https://pub.dev/packages/<package_name>
+```
+
+#### Key Security Considerations for App
+
+1. **Private Key Storage**: How are private keys stored? (should use secure enclave/keychain)
+2. **RPC Communication**: Is HTTPS enforced? Certificate pinning?
+3. **Input Validation**: Are addresses and amounts validated before sending?
+4. **No Telemetry**: Verify no analytics/tracking that could leak sensitive data
+
+---
+
+### 4. Test Coverage
+
+Run the test suite to verify contract behavior:
+
+```bash
+# Run all tests with verbose output
+just test
+
+# Run with gas report
+just test-gas
+
+# View test file
+cat test/Multisig.t.sol
+```
+
+Tests cover:
+- Constructor validation
+- Transaction submission
+- Multi-owner approval flow
+- Threshold enforcement
+- Edge cases (zero amounts, duplicate approvals, etc.)
+
+---
+
+### 5. Audit Recommendations
+
+1. **Smart Contract**: Focus on `src/Multisig.sol` - verify no fund extraction without threshold
+2. **TRC20 Reference**: Diff against official Tether source - should be identical
+3. **Flutter App**: Review key management and RPC security
+4. **Dependencies**: All are open source and verifiable on pub.dev and GitHub
+
+### Contact
+
+For audit questions or to report vulnerabilities, please write in out commmon Signal group
